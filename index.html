@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Sylph: Forest Spirit</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Lato:wght@300;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --c-text: #4a3b2a;
+            --c-accent: #d4a373;
+            --c-ui-bg: rgba(255, 248, 240, 0.85);
+            --shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #1a1a1a; /* Fallback */
+            font-family: 'Lato', sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+        }
+
+        /* Anime Vignette & Color Grading Overlay */
+        #post-process {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            background: radial-gradient(circle at center, transparent 50%, rgba(50, 40, 30, 0.4) 100%);
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.2);
+            mix-blend-mode: multiply;
+        }
+
+        /* UI Layer */
+        #ui-layer {
+            position: absolute;
+            z-index: 10;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+            color: var(--c-text);
+        }
+
+        /* Stats Card */
+        .hud-card {
+            background: var(--c-ui-bg);
+            backdrop-filter: blur(8px);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: var(--shadow);
+            pointer-events: auto;
+            max-width: 300px;
+            transform-origin: top left;
+            animation: slideIn 1s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        h1 {
+            font-family: 'Cinzel', serif;
+            margin: 0 0 10px 0;
+            font-size: 24px;
+            color: #2c3e50;
+            border-bottom: 2px solid var(--c-accent);
+            display: inline-block;
+        }
+
+        .stat-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .stat-icon { width: 24px; font-size: 18px; opacity: 0.8; }
+        .stat-bar-bg {
+            flex-grow: 1;
+            height: 8px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-left: 10px;
+            position: relative;
+        }
+        
+        .stat-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+            box-shadow: inset 0 2px 5px rgba(255,255,255,0.3);
+        }
+        
+        /* Earthy colors for bars */
+        .fill-food { background: #8d6e63; } /* Earthy Brown */
+        .fill-love { background: #e57373; } /* Muted Red */
+        .fill-rest { background: #81c784; } /* Muted Green */
+
+        /* Interaction Menu */
+        .dock {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            pointer-events: auto;
+        }
+
+        .action-btn {
+            width: 70px; height: 70px;
+            background: var(--c-ui-bg);
+            border-radius: 50%;
+            border: 2px solid #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            transition: all 0.3s ease;
+            font-family: 'Cinzel', serif;
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--c-text);
+        }
+
+        .action-btn i { font-size: 24px; margin-bottom: 2px; font-style: normal; }
+        .action-btn:hover { transform: translateY(-5px); background: #fff; }
+        .action-btn:active { transform: scale(0.95); }
+
+        /* Level Up Modal */
+        .modal {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%) scale(0.8);
+            background: #fff;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.5s;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 4px double var(--c-accent);
+        }
+        .modal.active { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
+        
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- The World -->
+    <canvas id="world"></canvas>
+    <!-- Overlay for Anime Filter -->
+    <div id="post-process"></div>
+
+    <div id="ui-layer">
+        <div class="hud-card">
+            <h1>Sylph</h1>
+            <div class="stat-row">
+                <span class="stat-icon">🍂</span>
+                <div class="stat-bar-bg"><div id="bar-food" class="stat-bar-fill fill-food" style="width: 80%"></div></div>
+            </div>
+            <div class="stat-row">
+                <span class="stat-icon">🌸</span>
+                <div class="stat-bar-bg"><div id="bar-love" class="stat-bar-fill fill-love" style="width: 60%"></div></div>
+            </div>
+            <div class="stat-row">
+                <span class="stat-icon">🌙</span>
+                <div class="stat-bar-bg"><div id="bar-rest" class="stat-bar-fill fill-rest" style="width: 90%"></div></div>
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; text-align: right; opacity: 0.7;">
+                Spirit Level <span id="lvl-val">1</span>
+            </div>
+        </div>
+
+        <div class="dock">
+            <div class="action-btn" id="btn-feed"><i>🌰</i>Offer</div>
+            <div class="action-btn" id="btn-play"><i>🦋</i>Play</div>
+            <div class="action-btn" id="btn-rest"><i>🕯️</i>Rest</div>
+        </div>
+    </div>
+
+    <div class="modal" id="levelup-modal">
+        <h1 style="font-size: 32px;">Ascension</h1>
+        <p>The spirit has grown stronger.</p>
+    </div>
+</div>
+
+<script>
+/**
+ * ENGINE & RENDERER
+ * Pure Canvas 2D "Vector" Engine
+ */
+
+const canvas = document.getElementById('world');
+const ctx = canvas.getContext('2d', { alpha: false }); // Optimize for opaque background
+let width, height;
+
+// Game State
+const game = {
+    stats: { food: 80, love: 60, rest: 90, xp: 0, level: 1 },
+    state: 'idle', // idle, eating, playing, sleeping
+    time: 0,
+    particles: [],
+    interactPos: null
+};
+
+// Resize & Setup
+function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Input Handling
+const mouse = { x: width/2, y: height/2, isDown: false };
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+window.addEventListener('mousedown', () => mouse.isDown = true);
+window.addEventListener('mouseup', () => mouse.isDown = false);
+window.addEventListener('touchstart', e => { 
+    mouse.x = e.touches[0].clientX; 
+    mouse.y = e.touches[0].clientY; 
+    mouse.isDown = true; 
+});
+
+// --- ASSET-LESS ART GENERATION ---
+
+/**
+ * Helper to draw anime-style soft shadows (Cel shading technique)
+ * Creates a clip mask, then draws the shadow offset.
+ */
+function drawCelShadow(ctx, pathFn, offsetX, offsetY, color) {
+    ctx.save();
+    pathFn(); // Define path
+    ctx.clip(); // Clip to shape
+    ctx.translate(offsetX, offsetY); // Move "light source"
+    pathFn(); // Redraw path shifted
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+}
+
+// --- BACKGROUND RENDERER ---
+const hills = [];
+for(let i=0; i<3; i++) {
+    hills.push({
+        y: 0.6 + (i * 0.1),
+        amp: 50 + i * 30,
+        freq: 0.002 + (i * 0.001),
+        color: i === 0 ? '#556b2f' : (i === 1 ? '#6b8e23' : '#8fbc8f') // Earthy greens
+    });
+}
+
+function drawBackground(t) {
+    // 1. Sky Gradient (Dawn/Dusk vibe)
+    let skyGrad = ctx.createLinearGradient(0, 0, 0, height);
+    skyGrad.addColorStop(0, '#fdfbf7'); // Cream top
+    skyGrad.addColorStop(1, '#e0c3fc'); // Very soft violet bottom
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Sun / God Rays
+    ctx.save();
+    ctx.translate(width * 0.8, height * 0.2);
+    let sunGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, 200);
+    sunGrad.addColorStop(0, 'rgba(255, 250, 205, 0.8)');
+    sunGrad.addColorStop(1, 'rgba(255, 250, 205, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath(); ctx.arc(0, 0, 200, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    // 3. Rolling Hills (Parallax)
+    hills.forEach((hill, i) => {
+        ctx.fillStyle = hill.color;
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+        for (let x = 0; x <= width; x += 10) {
+            // Sine wave combination for organic look
+            let y = height * hill.y - Math.sin(x * hill.freq + t * 0.0005) * hill.amp;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(width, height);
+        ctx.fill();
+        
+        // Rim light on hills (Anime aesthetic)
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.stroke();
+    });
+}
+
+// --- FOREGROUND GRASS ---
+const grassBlades = [];
+for(let i=0; i<60; i++) grassBlades.push({ x: Math.random(), h: Math.random() });
+
+function drawForeground(t) {
+    ctx.fillStyle = '#3e4a2e'; // Dark moss
+    ctx.beginPath();
+    
+    // Base ground
+    ctx.moveTo(0, height);
+    ctx.quadraticCurveTo(width/2, height - 60, width, height);
+    ctx.fill();
+
+    // Blades
+    grassBlades.forEach(b => {
+        const x = b.x * width;
+        const y = height - (Math.abs(x - width/2) < width/2 ? 20 : 0); // Crude ground adherence
+        const h = 20 + b.h * 40;
+        const sway = Math.sin(t * 0.002 + b.x * 10) * 10;
+        
+        ctx.beginPath();
+        ctx.moveTo(x, height);
+        ctx.quadraticCurveTo(x + sway/2, height - h/2, x + sway, height - h);
+        ctx.quadraticCurveTo(x + sway/2 + 5, height - h/2, x + 8, height);
+        ctx.fill();
+    });
+}
+
+// --- THE PET (SYLPH) ---
+
+const pet = {
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    radius: 60,
+    squishX: 1, squishY: 1,
+    blinkTimer: 0,
+    earAngle: 0,
+    
+    update(dt, t) {
+        // Destination logic
+        let targetX = width / 2;
+        let targetY = height - 120;
+        
+        if (game.state === 'playing') {
+            targetX = mouse.x;
+            targetY = mouse.y;
+        }
+
+        // Soft movement (Spring)
+        const ax = (targetX - this.x) * 0.05;
+        const ay = (targetY - this.y) * 0.05;
+        this.vx = (this.vx + ax) * 0.85;
+        this.vy = (this.vy + ay) * 0.85;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Squish animation based on velocity
+        const speed = Math.hypot(this.vx, this.vy);
+        this.squishY = 1 + Math.sin(t * 0.005) * 0.05 - (speed * 0.005);
+        this.squishX = 1 + (speed * 0.005);
+
+        // Face Mouse
+        this.lookX = (mouse.x - this.x) * 0.02;
+        this.lookY = (mouse.y - this.y) * 0.02;
+    },
+
+    draw(ctx, t) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.scale(this.squishX, this.squishY);
+
+        // 1. Body Base (Creamy White with Green tint)
+        const drawBodyShape = () => {
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+        };
+
+        // Base Color
+        ctx.fillStyle = '#f1f8e9'; // Very light green-white
+        drawBodyShape();
+        ctx.fill();
+
+        // Cel-Shaded Shadow (Bottom Right)
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = '#dcedc8'; // Darker green shadow
+        ctx.beginPath();
+        ctx.arc(20, 20, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Reset Composite
+        ctx.globalCompositeOperation = 'source-over';
+
+        // 2. Line Art Outline (Brown, organic)
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#5d4037'; 
+        drawBodyShape();
+        ctx.stroke();
+
+        // 3. Ears (Leaf shape)
+        const drawEar = (angleOffset, scaleX) => {
+            ctx.save();
+            ctx.rotate(angleOffset + Math.sin(t * 0.003) * 0.1);
+            ctx.translate(0, -this.radius + 10);
+            
+            // Leaf path
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(30 * scaleX, -40, 10 * scaleX, -80, 0, -90); // Tip
+            ctx.bezierCurveTo(-10 * scaleX, -80, -30 * scaleX, -40, 0, 0);
+            
+            // Fill Gradient
+            let grad = ctx.createLinearGradient(0, 0, 0, -90);
+            grad.addColorStop(0, '#81c784');
+            grad.addColorStop(1, '#a5d6a7');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            
+            // Outline
+            ctx.strokeStyle = '#388e3c';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Leaf vein
+            ctx.beginPath();
+            ctx.moveTo(0, -10);
+            ctx.lineTo(0, -70);
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            ctx.restore();
+        };
+
+        // Back Ear
+        drawEar(-0.4, 1);
+        // Front Ear
+        drawEar(0.4, -1);
+
+        // 4. Anime Eyes
+        this.drawEyes(ctx, this.lookX, this.lookY);
+
+        // 5. Blush
+        ctx.fillStyle = 'rgba(255, 182, 193, 0.6)';
+        ctx.filter = 'blur(4px)';
+        ctx.beginPath();
+        ctx.arc(-25, 15, 8, 0, Math.PI*2);
+        ctx.arc(25, 15, 8, 0, Math.PI*2);
+        ctx.fill();
+        ctx.filter = 'none';
+
+        // 6. Mouth (Tiny)
+        ctx.beginPath();
+        ctx.strokeStyle = '#5d4037';
+        ctx.lineWidth = 2;
+        if (game.stats.food < 30) {
+             ctx.arc(0, 25, 5, Math.PI, 0); // Sad
+        } else {
+            ctx.arc(0, 18, 5, 0, Math.PI); // Happy
+        }
+        ctx.stroke();
+
+        ctx.restore();
+    },
+
+    drawEyes(ctx, offsetX, offsetY) {
+        const eyeSpacing = 22;
+        const eyeY = -5;
+        
+        // Helper for one eye
+        const drawSingleEye = (x, y) => {
+            ctx.save();
+            ctx.translate(x + offsetX, y + offsetY);
+            
+            // Sclera (White)
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 12, 14, 0, 0, Math.PI*2);
+            ctx.fillStyle = '#fff';
+            ctx.fill();
+            ctx.clip(); // Clip inside eye
+
+            // Iris Gradient (Emerald Green to Gold)
+            let grad = ctx.createLinearGradient(0, -10, 0, 10);
+            grad.addColorStop(0, '#2e7d32'); // Dark Green top
+            grad.addColorStop(0.5, '#66bb6a'); // Mid Green
+            grad.addColorStop(1, '#ffd54f'); // Gold bottom
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 2, 9, 0, Math.PI*2);
+            ctx.fill();
+
+            // Pupil
+            ctx.fillStyle = '#1b5e20';
+            ctx.beginPath();
+            ctx.arc(0, 2, 4, 0, Math.PI*2);
+            ctx.fill();
+
+            // Highlights (The Anime Soul)
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.ellipse(-4, -6, 3, 2, Math.PI/4, 0, Math.PI*2); // Big top left
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.beginPath();
+            ctx.arc(3, 6, 1.5, 0, Math.PI*2); // Small bottom right reflection
+            ctx.fill();
+
+            ctx.restore();
+
+            // Eyelashes (Outside clip)
+            ctx.save();
+            ctx.translate(x + offsetX, y + offsetY);
+            ctx.beginPath();
+            ctx.moveTo(-12, -4);
+            ctx.quadraticCurveTo(0, -16, 12, -4); // Top lash line
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#3e2723';
+            ctx.stroke();
+            // Little lash flick
+            ctx.beginPath();
+            ctx.moveTo(12, -4);
+            ctx.lineTo(15, -8);
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+        };
+
+        // Blink Logic
+        if (this.blinkTimer > 0) {
+            this.blinkTimer--;
+            // Draw closed eyes
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#3e2723';
+            ctx.beginPath();
+            ctx.moveTo(-eyeSpacing - 10, eyeY);
+            ctx.quadraticCurveTo(-eyeSpacing, eyeY + 5, -eyeSpacing + 10, eyeY);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(eyeSpacing - 10, eyeY);
+            ctx.quadraticCurveTo(eyeSpacing, eyeY + 5, eyeSpacing + 10, eyeY);
+            ctx.stroke();
+        } else {
+            drawSingleEye(-eyeSpacing, eyeY);
+            drawSingleEye(eyeSpacing, eyeY);
+            if (Math.random() < 0.01) this.blinkTimer = 10;
+        }
+    }
+};
+
+// --- PARTICLE SYSTEM (VISUAL JUICE) ---
+class Particle {
+    constructor(x, y, type) {
+        this.x = x; this.y = y;
+        this.type = type;
+        this.life = 1;
+        this.angle = Math.random() * Math.PI * 2;
+        this.speed = Math.random() * 2 + 1;
+        this.vx = Math.cos(this.angle) * this.speed;
+        this.vy = Math.sin(this.angle) * this.speed;
+        this.size = Math.random() * 5 + 2;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= 0.02;
+        this.vy += 0.1; // Gravity
+    }
+    draw(ctx) {
+        ctx.globalAlpha = this.life;
+        if (this.type === 'heart') {
+            ctx.fillStyle = '#e57373';
+            ctx.font = "20px Arial";
+            ctx.fillText("♥", this.x, this.y);
+        } else if (this.type === 'sparkle') {
+            ctx.fillStyle = '#ffd54f';
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI*2); ctx.fill();
+        } else if (this.type === 'dust') {
+            // Ambient dust motes
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
+            this.life += 0.015; // Dust decays slower
+        }
+        ctx.globalAlpha = 1;
+    }
+}
+
+// --- GAME LOOP ---
+
+let lastTime = 0;
+function loop(timestamp) {
+    const dt = timestamp - lastTime;
+    lastTime = timestamp;
+
+    // Logic Update
+    pet.update(dt, timestamp);
+
+    // Decay Stats
+    if (timestamp % 60 < 1) { // roughly every second
+        game.stats.food = Math.max(0, game.stats.food - 0.05);
+        game.stats.love = Math.max(0, game.stats.love - 0.08);
+        game.stats.rest = Math.max(0, game.stats.rest - 0.03);
+        updateUI();
+    }
+
+    // Render
+    ctx.clearRect(0, 0, width, height);
+
+    drawBackground(timestamp);
+    
+    // Ambient Particles (Dust)
+    if (Math.random() < 0.05) {
+        const p = new Particle(Math.random()*width, Math.random()*height, 'dust');
+        p.vx = Math.random() - 0.5; p.vy = Math.random() - 0.5;
+        p.life = 0.5;
+        game.particles.push(p);
+    }
+
+    drawForeground(timestamp);
+
+    pet.draw(ctx, timestamp);
+
+    // Particle render
+    for (let i = game.particles.length - 1; i >= 0; i--) {
+        let p = game.particles[i];
+        p.update();
+        p.draw(ctx);
+        if (p.life <= 0) game.particles.splice(i, 1);
+    }
+
+    requestAnimationFrame(loop);
+}
+
+// UI Logic
+function updateUI() {
+    document.getElementById('bar-food').style.width = game.stats.food + '%';
+    document.getElementById('bar-love').style.width = game.stats.love + '%';
+    document.getElementById('bar-rest').style.width = game.stats.rest + '%';
+    
+    // Danger colors
+    if(game.stats.food < 20) document.getElementById('bar-food').style.backgroundColor = '#ef5350';
+    else document.getElementById('bar-food').style.backgroundColor = '#8d6e63';
+}
+
+function spawnParticles(x, y, count, type) {
+    for(let i=0; i<count; i++) game.particles.push(new Particle(x, y, type));
+}
+
+// Interactions
+document.getElementById('btn-feed').onclick = () => {
+    game.stats.food = Math.min(100, game.stats.food + 20);
+    game.state = 'idle';
+    pet.squishY = 0.6; // Big squish
+    spawnParticles(pet.x, pet.y, 10, 'sparkle');
+};
+
+document.getElementById('btn-play').onclick = () => {
+    game.stats.love = Math.min(100, game.stats.love + 20);
+    game.state = 'playing';
+    setTimeout(() => game.state = 'idle', 3000);
+    spawnParticles(pet.x, pet.y, 10, 'heart');
+};
+
+document.getElementById('btn-rest').onclick = () => {
+    game.stats.rest = Math.min(100, game.stats.rest + 30);
+    // Darken screen briefly
+    const pp = document.getElementById('post-process');
+    pp.style.backgroundColor = "rgba(0,0,0,0.8)";
+    setTimeout(() => pp.style.backgroundColor = "", 1000);
+};
+
+// Start
+updateUI();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
